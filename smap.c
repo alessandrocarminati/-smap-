@@ -15,7 +15,13 @@ typedef struct {
 Symbol symbols[MAX_SYMBOLS];
 int symbol_count = 0;
 
-void parse_system_map(const char *file_name) {
+int compare_symbols(const void *a, const void *b) {
+	uint64_t addr_a = ((Symbol *)a)->start_address;
+	uint64_t addr_b = ((Symbol *)b)->start_address;
+	return (addr_a > addr_b) - (addr_a < addr_b);
+}
+
+void parse_symbol_file(const char *file_name) {
 	uint64_t prev_address = 0;
 	char symbol_name[256];
 	uint64_t address;
@@ -34,8 +40,9 @@ void parse_system_map(const char *file_name) {
 
 		if (sscanf(line, "%" SCNx64 " %c %s", &address, &type, symbol_name) == 3) {
 			if ((type=='T') || (type=='t')) {
-				if (symbol_count > 0) {
-					symbols[symbol_count - 1].end_address = address;
+				if (symbol_count >= MAX_SYMBOLS) {
+					fprintf(stderr, "Too many symbols, increase MAX_SYMBOLS.\n");
+					exit(EXIT_FAILURE);
 				}
 
 				symbols[symbol_count].start_address = address;
@@ -44,26 +51,20 @@ void parse_system_map(const char *file_name) {
 				symbol_count++;
 			}
 		}
-
-		if (symbol_count >= MAX_SYMBOLS) {
-			fprintf(stderr, "Too many symbols, increase MAX_SYMBOLS.\n");
-			exit(EXIT_FAILURE);
-		}
 	}
 
-	symbols[symbol_count - 1].end_address = UINT64_MAX;
-
 	fclose(file);
-}
 
+	qsort(symbols, symbol_count, sizeof(Symbol), compare_symbols);
+
+	for (int i = 0; i < symbol_count - 1; i++) {
+		symbols[i].end_address = symbols[i + 1].start_address;
+	}
+	symbols[symbol_count - 1].end_address = UINT64_MAX;  // The last symbol's end address
+}
 const char *find_symbol(uint64_t address) {
 	int i;
-/*
-0xffffffff85200000<-> 0xffffffffc14c6094 -> __init_scratch_end
-                      0xffffffffc14b8008 -> __init_scratch_end
-*/
 	for (i = 0; i < symbol_count; i++) {
-//		printf("0x%" PRIx64 " <-> 0x%" PRIx64 " -> %s\n",symbols[i].start_address, symbols[i].end_address, symbols[i].symbol_name);
 		if (address >= symbols[i].start_address && address < symbols[i].end_address) {
 			return symbols[i].symbol_name;
 		}
@@ -96,7 +97,7 @@ int main(int argc, char *argv[]) {
 		exit(EXIT_FAILURE);
 	}
 
-	parse_system_map(system_map_file);
+	parse_symbol_file(system_map_file);
 
 	symbol = find_symbol(search_address);
 	if (symbol) {
